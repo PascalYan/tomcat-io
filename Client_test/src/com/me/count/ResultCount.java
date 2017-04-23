@@ -49,7 +49,9 @@ public class ResultCount extends Thread {
     public static long compareAndUpdateMaxOneCost(long time) {
         long old = maxOneCostTime.get();
         if (time > old) {
-            maxOneCostTime.compareAndSet(old, time);
+            if(!maxOneCostTime.compareAndSet(old, time)){
+                compareAndUpdateMaxOneCost(time);
+            }
         }
         return maxOneCostTime.get();
     }
