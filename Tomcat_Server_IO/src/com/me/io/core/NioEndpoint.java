@@ -204,6 +204,8 @@ public class NioEndpoint extends AbstractEndpoint<NioChannel> {
 
     /**
      * Poller thread count.
+     *
+     * min(2,Runtime.getRuntime().availableProcessors())  why？？？？？
      */
     private int pollerThreadCount = Math.min(2,Runtime.getRuntime().availableProcessors());
     public void setPollerThreadCount(int pollerThreadCount) { this.pollerThreadCount = pollerThreadCount; }
@@ -217,8 +219,9 @@ public class NioEndpoint extends AbstractEndpoint<NioChannel> {
      */
     private Poller[] pollers = null;
     private AtomicInteger pollerRotater = new AtomicInteger(0);
-    /**
+     /**
      * Return an available poller in true round robin fashion
+      * 以轮流的方式 返回一个可用的plller
      */
     public Poller getPoller0() {
         int idx = Math.abs(pollerRotater.incrementAndGet()) % pollers.length;
@@ -556,6 +559,7 @@ public class NioEndpoint extends AbstractEndpoint<NioChannel> {
                                                                        socketProperties.getAppWriteBufSize(),
                                                                        socketProperties.getDirectBuffer());
 
+                    //装入NioChannel中
                     channel = new NioChannel(socket, bufhandler);
                 }
             } else {
@@ -567,6 +571,8 @@ public class NioEndpoint extends AbstractEndpoint<NioChannel> {
                     channel.reset();
                 }
             }
+
+            //注册（丢到poller中 事件队列中）
             getPoller0().register(channel);
         } catch (Throwable t) {
             ExceptionUtils.handleThrowable(t);
@@ -624,6 +630,7 @@ public class NioEndpoint extends AbstractEndpoint<NioChannel> {
             SocketProcessor sc = processorCache.pop();
             if ( sc == null ) sc = new SocketProcessor(attachment, status);
             else sc.reset(attachment, status);
+            //和bio一样，交给业务线程池
             Executor executor = getExecutor();
             if (dispatch && executor != null) {
                 executor.execute(sc);
@@ -702,6 +709,9 @@ public class NioEndpoint extends AbstractEndpoint<NioChannel> {
                     // setSocketOptions() will add channel to the poller
                     // if successful
                     if (running && !paused) {
+
+                        //在这里将socket封装进NioChannel中
+
                         if (!setSocketOptions(socket)) {
                             countDownConnection();
                             closeSocket(socket);
@@ -1124,11 +1134,13 @@ public class NioEndpoint extends AbstractEndpoint<NioChannel> {
                                 unreg(sk, attachment, sk.readyOps());
                                 boolean closeSocket = false;
                                 // Read goes before write
+                                //读事件，交给业务线程池  从socket中读数据  处理业务逻辑
                                 if (sk.isReadable()) {
                                     if (!processSocket(attachment, SocketStatus.OPEN_READ, true)) {
                                         closeSocket = true;
                                     }
                                 }
+                                //写事件
                                 if (!closeSocket && sk.isWritable()) {
                                     if (!processSocket(attachment, SocketStatus.OPEN_WRITE, true)) {
                                         closeSocket = true;
@@ -1478,11 +1490,12 @@ public class NioEndpoint extends AbstractEndpoint<NioChannel> {
             // Upgraded connections need to allow multiple threads to access the
             // connection at the same time to enable blocking IO to be used when
             // NIO has been configured
+            //写事件
             if (ka.isUpgraded() && SocketStatus.OPEN_WRITE == status) {
                 synchronized (ka.getWriteThreadLock()) {
                     doRun();
                 }
-            } else {
+            } else {//读事件
                 synchronized (socket) {
                     doRun();
                 }
